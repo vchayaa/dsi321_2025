@@ -1,146 +1,174 @@
-# Tutorial 07: End-to-End Real-Time Data Pipeline with Prefect 3 and lakeFS
+# Real-Time Weather Data Pipeline
+
+A real-time data pipeline for collecting, processing, and analyzing weather data using Prefect 3, Docker, Jupyter, and LakeFS.
 
 ## Project Overview
-Welcome to **Tutorial 07** of the `papapipeline` repository, designed to guide students in building an end-to-end real-time data pipeline. This tutorial extends the concepts from earlier tutorials (e.g., `tutorial03`) by empowering you to design a custom pipeline that collects data every 15 minutes from a chosen source, orchestrates it using **Prefect 3**, stores it in a **lakeFS** data lake via S3A protocol, and visualizes it using **Streamlit**. The tutorial emphasizes modern data engineering practices, including workflow orchestration, data lake storage, and version control with GitHub.
 
-In this example, we use the **OpenWeatherMap API** to collect weather data (e.g., temperature, humidity, wind speed) for a city (e.g., Bangkok). You can adapt the pipeline for other data sources (e.g., Twitter API, sensor data) by modifying the schema and scripts. The tutorial aligns with the educational goals of `papapipeline`, providing hands-on experience for data science and engineering students.[](https://wasit7.medium.com/building-a-simple-prefect-3-data-pipeline-with-jupyter-and-docker-7eeac8f7df0f)[](https://wasit7.medium.com/bringing-data-science-and-engineering-to-thai-students-a-practical-prefect-3-tutorial-2ba765e297bc)
+This project implements a data pipeline that:
 
-## Prerequisites
-- **Python 3.8+**
-- **Docker** and **Docker Compose**
-- **GitHub** account with SSH access
-- **OpenWeatherMap API key** (sign up at https://openweathermap.org)
-- **lakeFS** instance (local or remote) with S3A credentials
-- Basic knowledge of Prefect 3, Docker, and Git
+1. Collects real-time weather data from the OpenWeatherMap API
+2. Processes and transforms the data
+3. Stores both raw and processed data in LakeFS (using the existing "project324" repository)
+4. Provides tools for data analysis using Jupyter notebooks
+5. Visualizes weather data with Streamlit
 
-## Setup Instructions
-Follow these steps to set up the tutorial environment:
+## Technologies Used
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/wasit7/papapipeline.git
-   cd papapipeline/tutorial07
+- **Prefect 3**: Workflow orchestration
+- **Docker**: Containerization
+- **Jupyter**: Interactive data analysis
+- **LakeFS**: Data versioning and management
+- **Python**: Programming language
+- **Pandas/PyArrow**: Data manipulation
+- **Streamlit/Plotly**: Data visualization
+
+## Project Structure
+
+```
+project_repo/
+├── docker/
+│   ├── Dockerfile                # Docker image configuration
+│   └── docker-compose.yml        # Docker services configuration
+├── notebooks/
+│   └── weather_analysis.ipynb    # Jupyter notebook for data analysis
+├── src/
+│   ├── __init__.py               # Package initialization
+│   ├── config.py                 # Configuration settings (single source of truth)
+│   ├── deploy.py                 # Deployment script for Prefect
+│   ├── main.py                   # Main pipeline implementation
+│   └── utils.py                  # Utility functions
+├── visualization/
+│   └── app.py                    # Streamlit visualization app
+├── .env                          # Environment variables
+├── README.md                     # Project documentation
+├── STRUCTURE.md                  # Project structure documentation
+└── requirements.txt              # Python dependencies
+```
+
+## Setup and Installation
+
+### Prerequisites
+
+- Docker and Docker Compose
+- Python 3.8+
+- OpenWeatherMap API key
+- LakeFS repository (already created: "project324")
+
+### Installation Steps
+
+1. Clone the repository:
+   ```
+   git clone <repository-url>
+   cd project_repo
    ```
 
-2. **Install Dependencies**:
-   ```bash
+2. Ensure your LakeFS repository "project324" is set up and accessible
+
+3. Install the required Python packages:
+   ```
    pip install -r requirements.txt
    ```
 
-3. **Set Environment Variables**:
-   - Obtain an OpenWeatherMap API key and set it:
-     ```bash
-     export OPENWEATHER_API_KEY=your-api-key
-     ```
-   - Update lakeFS credentials in `src/pipeline.py`, `src/setup.py`, and `visualization/app.py`:
-     ```python
-     LAKEFS_ENDPOINT = "http://localhost:8000"
-     LAKEFS_ACCESS_KEY = "your-lakefs-access-key"
-     LAKEFS_SECRET_KEY = "your-lakefs-secret-key"
-     LAKEFS_REPO = "student-repo"
-     LAKEFS_BRANCH = "main"
-     ```
-
-4. **Run Setup Script**:
-   Initialize the lakeFS repository and environment:
-   ```bash
-   python src/setup.py
+4. Start the Docker containers:
    ```
-
-5. **Start Docker Services**:
-   Launch Prefect server and Streamlit:
-   ```bash
+   cd docker
    docker-compose up -d
    ```
 
-6. **Deploy Prefect Flow**:
-   Deploy the pipeline with a 15-minute schedule:
-   ```bash
-   python src/pipeline.py deploy
-   ```
-   This creates a deployment named `data-pipeline` in the `default-agent-pool` work pool, running every 15 minutes (`cron="*/15 * * * *"`).
+## Running the Pipeline
 
-## Usage
-- **Prefect UI**: Monitor pipeline execution at `http://localhost:4200`.
-- **Streamlit Dashboard**: View real-time data visualizations at `http://localhost:8501`.
-- **lakeFS Data Lake**: Access stored data via an S3A client (endpoint: `http://localhost:8000`, repository: `student-repo`, branch: `main`).
-- **GitHub Integration**:
-  - Push changes to your repository:
-    ```bash
-    git add .
-    git commit -m "Updated pipeline code"
-    git push origin main
-    ```
-  - Ensure at least 3 commits for KPI compliance.
+### Manual Execution
 
-## Schema
-The data schema is defined in `SCHEMA.md`. For the weather data example:
-```python
-{
-    "columns": ["timestamp", "city", "temperature", "humidity", "wind_speed"],
-    "types": ["TEXT", "TEXT", "REAL", "INTEGER", "REAL"],
-    "key_columns": ["temperature", "humidity", "wind_speed"]
-}
+To run the pipeline manually:
+
 ```
-- **timestamp**: ISO format timestamp of data collection.
-- **city**: City name (e.g., Bangkok).
-- **temperature**: Temperature in Celsius.
-- **humidity**: Humidity percentage.
-- **wind_speed**: Wind speed in meters/second.
+python -m src.pipeline
+```
 
-Key columns are used for data quality checks (no missing values). Adapt the schema for your data source as needed.
+This will:
+- Collect weather data for Thai provinces (Pathum Thani, Bangkok, Chiang Mai, Phuket)
+- Collect weather data for international cities
+- Process and save the data
+- Upload the data to your LakeFS repository "project324"
 
-## Results
-Upon successful completion, the pipeline:
-- Collects 500+ records over 1 week (672 records at 4 records/hour × 24 hours × 7 days).
-- Stores data in lakeFS as Parquet files (`main/data/`), matching the documented schema.
-- Achieves 90%+ successful Prefect flow runs over 24 hours (96 runs).
-- Displays real-time data in a Streamlit dashboard with a table and temperature trend chart.
-- Maintains a GitHub repository with 8 files and 3+ commits, fully documented code, and a comprehensive final report.
+### Scheduled Execution
 
-## Troubleshooting
-- **API Errors**: Verify `OPENWEATHER_API_KEY` is set correctly.
-- **lakeFS Access**: Ensure lakeFS credentials and endpoint are valid. Check lakeFS server is running (`docker run -p 8000:8000 treeverse/lakefs`).
-- **Docker Issues**: Confirm ports 4200 (Prefect) and 8501 (Streamlit) are free. Restart containers with `docker-compose down && docker-compose up -d`.
-- **Prefect Failures**: Check Prefect UI logs for errors. Ensure the work pool (`default-agent-pool`) is active.
-- **GitHub Push Errors**: Verify SSH key setup:
-  ```bash
-  ssh-keygen -t ed25519 -C "your_email@example.com"
-  cat ~/.ssh/id_ed25519.pub
-  ```
-  Add the public key to GitHub (Settings → SSH Keys).
+To create a scheduled deployment:
+
+```
+python -m src.deploy
+```
+
+This will deploy the pipeline to run at the interval specified in your configuration.
+
+## Data Analysis
+
+1. Start Jupyter Notebook:
+   ```
+   jupyter notebook
+   ```
+
+2. Open the `notebooks/weather_analysis.ipynb` notebook
+
+3. Follow the instructions in the notebook to analyze the collected weather data
+
+## Data Visualization
+
+To visualize the weather data with Streamlit:
+
+```
+cd visualization
+streamlit run app.py
+```
+
+This will start a Streamlit server and open a web browser with the visualization dashboard.
+
+## LakeFS Integration
+
+The pipeline is configured to work with your existing LakeFS repository "project324":
+
+- Data is stored in the "main" branch by default
+- Province data is stored in the "province" directory
+- City data is stored in the "city" directory
+- Both raw and processed data are versioned
+
+You can access the LakeFS UI at http://localhost:8001 (or your configured port) to browse, compare, and manage your data versions.
+
+## Configuration
+
+All configuration is centralized in `src/config.py`:
+
+- Weather API settings
+- Province and city definitions
+- Data storage paths
+- LakeFS connection details
+- Prefect settings
+
+You can override these settings by updating the `.env` file.
 
 ## Customization
-To use a different data source (e.g., Twitter API, sensor data):
-1. Update `src/pipeline.py` to fetch and process data from your source.
-2. Modify `SCHEMA.md` with your schema, specifying columns, types, and key columns.
-3. Adjust `visualization/app.py` to display relevant metrics and charts.
-4. Update `REPORT.md` to document your data source and visualization.
-5. Ensure lakeFS stores 500+ records and the pipeline runs every 15 minutes.
 
-## Files
-- `src/pipeline.py`: Prefect pipeline script for data collection, processing, and lakeFS storage.
-- `src/setup.py`: Setup script to initialize environment and lakeFS repository.
-- `visualization/app.py`: Streamlit script for data visualization.
-- `docker-compose.yml`: Docker configuration for Prefect and Streamlit.
-- `SCHEMA.md`: Data schema documentation.
-- `REPORT.md`: Final project report.
-- `README.md`: This file, with setup and usage instructions.
-- `requirements.txt`: Python dependencies.
+You can customize the pipeline by:
 
-## Requirements
-See `requirements.txt` for dependencies, including:
-- `prefect==3.0.0`
-- `pandas==2.2.2`
-- `requests==2.31.0`
-- `streamlit==1.38.0`
-- `plotly==5.22.0`
-- `boto3==1.34.0`
-- `pyarrow==15.0.0`
+1. Adding more provinces or cities in the `PROVINCES` and `CITIES` variables in `src/config.py`
+2. Modifying the data collection interval in `.env`
+3. Adding more data processing steps in `src/main.py`
+4. Extending the visualization in `visualization/app.py`
+
+## Troubleshooting
+
+If you encounter issues:
+
+1. Ensure LakeFS is running and accessible
+2. Check that your OpenWeatherMap API key is valid
+3. Verify that the data directories exist and are writable
+4. Check the Prefect UI for any task failures
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Acknowledgments
-This tutorial builds on the `papapipeline` framework by Wasit Limprasert, inspired by `tutorial03`’s use of Prefect 3, Docker, and GitHub integration.[](https://wasit7.medium.com/building-a-simple-prefect-3-data-pipeline-with-jupyter-and-docker-7eeac8f7df0f)[](https://wasit7.medium.com/bringing-data-science-and-engineering-to-thai-students-a-practical-prefect-3-tutorial-2ba765e297bc)
 
----
-
-**Happy Pipelining!** 🚀
+- OpenWeatherMap for providing the weather data API
+- The Prefect, Docker, and LakeFS communities for their excellent documentation
