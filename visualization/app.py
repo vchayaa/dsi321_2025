@@ -1,245 +1,701 @@
 import streamlit as st
+# Page config must be the first Streamlit command
+st.set_page_config(page_title="Weather Data Analysis", layout="wide")
+
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import os
 import io
+from datetime import datetime
+import pytz
+
+# Define Thailand timezone
+thai_tz = pytz.timezone('Asia/Bangkok')
+
+# Add a function to convert timestamps to Thailand time
+def convert_to_thai_time(df):
+    """Convert timestamp column to Thailand timezone"""
+    if 'timestamp' in df.columns and not df.empty:
+        # Check if timestamps already have timezone info
+        has_tzinfo = False
+        if pd.api.types.is_datetime64_dtype(df['timestamp']):
+            sample = df['timestamp'].iloc[0]
+            has_tzinfo = sample.tzinfo is not None
+        
+        if not has_tzinfo:
+            # If timestamps don't have timezone, assume they're UTC and convert to Thai time
+            df['timestamp'] = df['timestamp'].dt.tz_localize('UTC').dt.tz_convert(thai_tz)
+        else:
+            # If they have timezone but it's not Thai time, convert
+            if df['timestamp'].iloc[0].tzinfo != thai_tz:
+                df['timestamp'] = df['timestamp'].dt.tz_convert(thai_tz)
+    
+    return df
+
+# Function to optimize data types
+def optimize_dtypes(df):
+    """Optimize data types to reduce memory usage and improve performance."""
+    df_optimized = df.copy()
+    
+    # Convert object columns to string or category
+    for col in df.select_dtypes(include=['object']).columns:
+        # If the number of unique values is less than 50% of the data, convert to category
+        if df[col].nunique() / len(df) < 0.5:
+            df_optimized[col] = df[col].astype('category')
+        else:
+            # Use pandas string type instead of object
+            df_optimized[col] = df[col].astype('string')
+    
+    # Convert float64 columns to float32 if possible
+    for col in df.select_dtypes(include=['float64']).columns:
+        # Check if the column can be safely converted to float32
+        if df[col].min() > np.finfo(np.float32).min and df[col].max() < np.finfo(np.float32).max:
+            df_optimized[col] = df[col].astype(np.float32)
+    
+    return df_optimized
+
+# Initialize session state if not already done
+if 'data_loaded' not in st.session_state:
+    st.session_state['data_loaded'] = False
 
 # Add error handling for lakefs_client import
 try:
-    from lakefs_client.client import LakeFSClient
+    from lakefs_client import Configuration, ApiClient
+    from lakefs_client.apis import ObjectsApi
     LAKEFS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     LAKEFS_AVAILABLE = False
-    st.warning("lakefs_client not installed. Some features may not work.")
+    st.sidebar.error(f"Import error: {str(e)}")
 
-# Page config
-st.set_page_config(page_title="Weather Data Analysis", layout="wide")
+# Title and sidebar
 st.title("🌦️ Weather Data Analysis Dashboard")
+st.sidebar.header("LakeFS Connection")
 
-# LakeFS connection
-if LAKEFS_AVAILABLE:
-    client = LakeFSClient(
-        endpoint=os.environ["LAKEFS_ENDPOINT"],
-        access_key=os.environ["LAKEFS_ACCESS_KEY"],
-        secret_key=os.environ["LAKEFS_SECRET_KEY"]
+# Hardcoded LakeFS connection settings (not visible to users)
+lakefs_endpoint = "http://lakefs-dev:8000/"
+lakefs_access_key = "access_key"
+lakefs_secret_key = "secret_key"
+lakefs_repo = "weather"
+lakefs_branch = "main"
+
+# Add a simple note in the sidebar about the connection
+st.sidebar.info("Using default LakeFS connection")
+
+# Function to load data from LakeFS
+def load_data_from_lakefs():
+    try:
+        # Create configuration
+        config = Configuration()
+        config.host = lakefs_endpoint
+        config.username = lakefs_access_key
+        config.password = lakefs_secret_key
+        
+        # Create API client
+        api_client = ApiClient(config)
+        objects_api = ObjectsApi(api_client)
+        
+        path = "weather.parquet"
+        
+        # Configure storage options for LakeFS (S3-compatible)
+        storage_options = {
+            "key": lakefs_access_key,
+            "secret": lakefs_secret_key,
+            "client_kwargs": {
+                "endpoint_url": lakefs_endpoint
+            }
+        }
+        
+        # Construct the full LakeFS S3-compatible path
+        lakefs_s3_path = f"s3a://{lakefs_repo}/{lakefs_branch}/{path}"
+        
+        # Load data using pandas read_parquet
+        df = pd.read_parquet(
+            lakefs_s3_path,
+            storage_options=storage_options
+        )
+        
+        # Ensure timestamp column is datetime
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            # Convert to Thailand timezone
+            df = convert_to_thai_time(df)
+        
+        # Optimize data types
+        df = optimize_dtypes(df)
+        
+        return df, True
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
+        return None, False
+
+# Function to generate sample data for demo mode
+def generate_sample_data():
+    dates = pd.date_range(start='2023-01-01', periods=100, freq='H', tz=thai_tz)
+    sample_data = {
+        'timestamp': dates,
+        'main.temp': np.sin(np.arange(100)/10) * 5 + 25 + np.random.normal(0, 1, 100),
+        'main.humidity': np.cos(np.arange(100)/10) * 10 + 60 + np.random.normal(0, 3, 100),
+        'wind.speed': np.abs(np.random.normal(5, 2, 100)),
+        'precipitation': np.abs(np.random.exponential(0.5, 100)) * (np.random.random(100) > 0.7),
+        'weather.main': np.random.choice(['Clear', 'Clouds', 'Rain', 'Drizzle'], 100),
+        'province': np.random.choice(['Bangkok', 'Chiang Mai', 'Phuket', 'Pathum Thani'], 100)
+    }
+    sample_df = pd.DataFrame(sample_data)
+    return optimize_dtypes(sample_df)
+
+# Function to filter data based on user selections
+def filter_data(df, location_col, selected_locations, date_range):
+    filtered_df = df.copy()
+    
+    # Filter by location
+    if location_col and selected_locations:
+        filtered_df = filtered_df[filtered_df[location_col].isin(selected_locations)]
+    
+    # Filter by date range
+    if 'timestamp' in filtered_df.columns and date_range and len(date_range) == 2:
+        start_date, end_date = date_range
+        mask = (filtered_df['timestamp'].dt.date >= start_date) & (filtered_df['timestamp'].dt.date <= end_date)
+        filtered_df = filtered_df[mask]
+    
+    return filtered_df
+
+# Function to create weather overview visualizations
+def show_weather_overview(filtered_df, location_col, selected_locations):
+    st.header("Current Weather Metrics")
+    
+    # Get the most recent data point
+    if 'timestamp' in filtered_df.columns:
+        latest_data = filtered_df.sort_values('timestamp').iloc[-1]
+    else:
+        latest_data = filtered_df.iloc[-1]
+    
+    # Create metrics display
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Temperature
+    if 'main.temp' in filtered_df.columns:
+        col1.metric("Temperature", f"{latest_data['main.temp']:.1f} °C")
+    elif 'temperature' in filtered_df.columns:
+        col1.metric("Temperature", f"{latest_data['temperature']:.1f} °C")
+    
+    # Humidity
+    if 'main.humidity' in filtered_df.columns:
+        col2.metric("Humidity", f"{latest_data['main.humidity']:.1f} %")
+    elif 'humidity' in filtered_df.columns:
+        col2.metric("Humidity", f"{latest_data['humidity']:.1f} %")
+    
+    # Wind Speed
+    if 'wind.speed' in filtered_df.columns:
+        col3.metric("Wind Speed", f"{latest_data['wind.speed']:.1f} m/s")
+    elif 'wind_speed' in filtered_df.columns:
+        col3.metric("Wind Speed", f"{latest_data['wind_speed']:.1f} m/s")
+    
+    # Precipitation
+    if 'precipitation' in filtered_df.columns:
+        col4.metric("Precipitation", f"{latest_data['precipitation']:.1f} mm")
+    
+    # Weather condition
+    if 'weather.main' in filtered_df.columns:
+        weather_col = 'weather.main'
+        desc_col = 'weather.description' if 'weather.description' in filtered_df.columns else None
+    elif 'weather_main' in filtered_df.columns:
+        weather_col = 'weather_main'
+        desc_col = 'weather_description' if 'weather_description' in filtered_df.columns else None
+    else:
+        weather_col = None
+        
+    if weather_col:
+        st.subheader("Current Weather Condition")
+        weather_desc = latest_data.get(desc_col, '') if desc_col else ''
+        st.info(f"🌤️ {latest_data[weather_col]} - {weather_desc}")
+    
+    # Weather metrics over time
+    st.subheader("Weather Metrics Over Time")
+    
+    # Define the specific metrics we want to display
+    specific_metrics = []
+    # Temperature
+    if 'main.temp' in filtered_df.columns:
+        specific_metrics.append(('main.temp', 'Temperature'))
+    elif 'temperature' in filtered_df.columns:
+        specific_metrics.append(('temperature', 'Temperature'))
+
+    # Humidity
+    if 'main.humidity' in filtered_df.columns:
+        specific_metrics.append(('main.humidity', 'Humidity'))
+    elif 'humidity' in filtered_df.columns:
+        specific_metrics.append(('humidity', 'Humidity'))
+
+    # Wind Speed
+    if 'wind.speed' in filtered_df.columns:
+        specific_metrics.append(('wind.speed', 'Wind Speed'))
+    elif 'wind_speed' in filtered_df.columns:
+        specific_metrics.append(('wind_speed', 'Wind Speed'))
+
+    # Precipitation
+    if 'precipitation' in filtered_df.columns:
+        specific_metrics.append(('precipitation', 'Precipitation'))
+
+    # Let user select from only these specific metrics
+    metric_options = [name for _, name in specific_metrics]
+    selected_metric_names = st.multiselect(
+        "Select Metrics to Display", 
+        options=metric_options,
+        default=metric_options  # Default to all metrics selected
     )
 
-    repo = os.environ["LAKEFS_REPO"]
-    branch = os.environ["LAKEFS_BRANCH"]
-    path = "weather_data/temperature.csv"
-
-    try:
-        # Load data
-        obj = client.objects.get_object(repo, branch, path)
-        df = pd.read_csv(io.BytesIO(obj.read()))
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+    # Map selected names back to column names
+    selected_metrics = [col for col, name in specific_metrics if name in selected_metric_names]
+    
+    if 'timestamp' in filtered_df.columns and selected_metrics:
+        # Create a working copy of the dataframe
+        plot_df = filtered_df.copy()
         
-        # Sidebar
+        # Ensure timestamp column is datetime type
+        if not pd.api.types.is_datetime64_any_dtype(plot_df['timestamp']):
+            try:
+                plot_df['timestamp'] = pd.to_datetime(plot_df['timestamp'])
+            except Exception as e:
+                st.error(f"Could not convert timestamp column to datetime format: {str(e)}")
+                return
+        
+        # Convert all selected metrics to numeric type before plotting
+        for metric in selected_metrics:
+            if metric in plot_df.columns:
+                plot_df[metric] = pd.to_numeric(plot_df[metric], errors='coerce')
+        
+        # Sort dataframe by timestamp to ensure chronological order
+        plot_df = plot_df.sort_values('timestamp')
+        
+        # Create the figure
+        fig = go.Figure()
+
+        # Note: Day separators were removed due to compatibility issues with Plotly and pandas timestamps
+        
+        # Determine if we should color by location
+        color_by_location = False
+        if location_col and len(selected_locations) > 1:
+            color_by_location = True
+        
+        # Add traces for each metric
+        for metric in selected_metrics:
+            display_name = metric.split('.')[-1].capitalize() if '.' in metric else metric.capitalize()
+            
+            if color_by_location:
+                # Create separate traces for each location
+                for location in selected_locations:
+                    location_df = plot_df[plot_df[location_col] == location].copy()
+                    if not location_df.empty:
+                        try:
+                            fig.add_trace(go.Scatter(
+                                x=location_df['timestamp'],
+                                y=location_df[metric],
+                                mode='lines+markers',
+                                name=f"{display_name} - {location}",
+                                hovertemplate=f'{location}: %{{y:.1f}} - %{{x}}<extra></extra>'
+                            ))
+                        except Exception as e:
+                            st.warning(f"Could not plot {metric} for {location}: {str(e)}")
+            else:
+                try:
+                    fig.add_trace(go.Scatter(
+                        x=plot_df['timestamp'],
+                        y=plot_df[metric],
+                        mode='lines+markers',
+                        name=display_name,
+                        hovertemplate='%{y:.1f} - %{x}<extra></extra>'
+                    ))
+                except Exception as e:
+                    st.warning(f"Could not plot {metric}: {str(e)}")
+        
+        fig.update_layout(
+            title="Weather Metrics Trend",
+            xaxis_title="Time",
+            yaxis_title="Value",
+            legend_title="Metrics",
+            hovermode="x unified",
+            xaxis=dict(
+                tickformat="%H:%M\n%b %d",
+                tickangle=-45
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+# Function to show temperature trends
+def show_temperature_trends(filtered_df):
+    st.header("Temperature Trends Over Time")
+    
+    # Determine temperature column
+    if 'main.temp' in filtered_df.columns:
+        temp_col = 'main.temp'
+    elif 'temperature' in filtered_df.columns:
+        temp_col = 'temperature'
+    else:
+        temp_col = None
+        
+    if temp_col and 'timestamp' in filtered_df.columns:
+        # Ensure temperature column is numeric
+        filtered_df[temp_col] = pd.to_numeric(filtered_df[temp_col], errors='coerce')
+        
+        # Create a copy of the dataframe for plotting
+        plot_df = filtered_df.copy()
+        plot_df = plot_df.sort_values('timestamp')
+        
+        # Determine location column
+        location_col = None
+        for col_name in ['requested_province', 'province', 'location', 'city']:
+            if col_name in plot_df.columns:
+                location_col = col_name
+                break
+        
+        # Create an enhanced interactive line chart
+        st.subheader("Temperature Variation Over Time")
+        
+        # Calculate average temperature
+        avg_temp = plot_df[temp_col].mean()
+        
+        # Create the figure
+        fig = go.Figure()
+        
+        # Add temperature line(s)
+        if location_col and len(plot_df[location_col].unique()) > 1:
+            # Multiple locations - create a line for each
+            for location in plot_df[location_col].unique():
+                location_df = plot_df[plot_df[location_col] == location]
+                fig.add_trace(go.Scatter(
+                    x=location_df['timestamp'],
+                    y=location_df[temp_col],
+                    mode='lines+markers',
+                    name=location,
+                    hovertemplate='%{y:.1f}°C at %{x}<br>Location: ' + location + '<extra></extra>'
+                ))
+        else:
+            # Single location or no location column
+            fig.add_trace(go.Scatter(
+                x=plot_df['timestamp'],
+                y=plot_df[temp_col],
+                mode='lines+markers',
+                name='Temperature',
+                line=dict(color='firebrick', width=3),
+                hovertemplate='%{y:.1f}°C at %{x}<extra></extra>'
+            ))
+        
+        # Add average temperature line
+        fig.add_trace(go.Scatter(
+            x=[plot_df['timestamp'].min(), plot_df['timestamp'].max()],
+            y=[avg_temp, avg_temp],
+            mode='lines',
+            name='Average',
+            line=dict(color='gray', width=2, dash='dash'),
+            hovertemplate=f'Average: {avg_temp:.1f}°C<extra></extra>'
+        ))
+        
+        # Improve layout
+        fig.update_layout(
+            title="Temperature Trends",
+            xaxis_title="Time",
+            yaxis_title="Temperature (°C)",
+            legend_title="Legend",
+            hovermode="x unified",
+            xaxis=dict(
+                tickformat="%H:%M\n%b %d",
+                tickangle=-45,
+                rangeslider=dict(visible=True),
+                type="date"
+            ),
+            yaxis=dict(
+                gridcolor='lightgray'
+            ),
+            plot_bgcolor='white',
+            height=500
+        )
+        
+        # Add range selector buttons
+        fig.update_xaxes(
+            rangeslider_visible=True,
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=6, label="6h", step="hour", stepmode="backward"),
+                    dict(count=12, label="12h", step="hour", stepmode="backward"),
+                    dict(count=1, label="1d", step="day", stepmode="backward"),
+                    dict(count=3, label="3d", step="day", stepmode="backward"),
+                    dict(count=7, label="1w", step="day", stepmode="backward"),
+                    dict(step="all", label="All")
+                ])
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Temperature heatmap by hour and day
+        if len(filtered_df) > 24:
+            st.subheader("Temperature Patterns by Hour and Day")
+            
+            # Extract day and hour for heatmap
+            heatmap_df = filtered_df.copy()
+            heatmap_df['day'] = heatmap_df['timestamp'].dt.day
+            heatmap_df['hour'] = heatmap_df['timestamp'].dt.hour
+            
+            # Create pivot table for heatmap
+            temp_pivot = heatmap_df.pivot_table(
+                values=temp_col, 
+                index='day',
+                columns='hour',
+                aggfunc='mean'
+            )
+            
+            # Create an enhanced heatmap
+            fig_heatmap = px.imshow(
+                temp_pivot,
+                labels=dict(x="Hour of Day", y="Day of Month", color="Temperature (°C)"),
+                x=temp_pivot.columns,
+                y=temp_pivot.index,
+                color_continuous_scale="RdBu_r",
+                aspect="auto"
+            )
+            
+            fig_heatmap.update_layout(
+                title="Temperature Heatmap by Hour and Day",
+                xaxis=dict(
+                    tickmode='array',
+                    tickvals=list(range(0, 24, 3)),
+                    ticktext=[f"{h}:00" for h in range(0, 24, 3)]
+                ),
+                coloraxis_colorbar=dict(
+                    title="°C",
+                ),
+                height=400
+            )
+            
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+        
+        # Add temperature statistics and insights
+        st.subheader("Temperature Statistics")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Average Temperature", f"{avg_temp:.1f} °C")
+        
+        with col2:
+            max_temp = filtered_df[temp_col].max()
+            max_temp_time = filtered_df.loc[filtered_df[temp_col].idxmax(), 'timestamp']
+            st.metric("Maximum Temperature", f"{max_temp:.1f} °C")
+            st.caption(f"Recorded at: {max_temp_time.strftime('%Y-%m-%d %H:%M')}")
+        
+        with col3:
+            min_temp = filtered_df[temp_col].min()
+            min_temp_time = filtered_df.loc[filtered_df[temp_col].idxmin(), 'timestamp']
+            st.metric("Minimum Temperature", f"{min_temp:.1f} °C")
+            st.caption(f"Recorded at: {min_temp_time.strftime('%Y-%m-%d %H:%M')}")
+        
+        # Temperature variation by time of day
+        st.subheader("Temperature Variation by Time of Day")
+        
+        # Group by hour and calculate statistics
+        hour_stats = filtered_df.copy()
+        hour_stats['hour'] = hour_stats['timestamp'].dt.hour
+        hourly_temps = hour_stats.groupby('hour')[temp_col].agg(['mean', 'min', 'max']).reset_index()
+        
+        # Create hourly temperature chart
+        fig_hourly = go.Figure()
+        
+        # Add range (min to max)
+        fig_hourly.add_trace(go.Scatter(
+            x=hourly_temps['hour'],
+            y=hourly_temps['max'],
+            fill=None,
+            mode='lines',
+            line_color='rgba(231,107,243,0.2)',
+            showlegend=False,
+            name='Max'
+        ))
+        
+        fig_hourly.add_trace(go.Scatter(
+            x=hourly_temps['hour'],
+            y=hourly_temps['min'],
+            fill='tonexty',
+            mode='lines',
+            line_color='rgba(231,107,243,0.2)',
+            name='Temperature Range'
+        ))
+        
+        # Add mean line
+        fig_hourly.add_trace(go.Scatter(
+            x=hourly_temps['hour'],
+            y=hourly_temps['mean'],
+            mode='lines+markers',
+            line=dict(color='rgb(231,107,243)', width=3),
+            name='Average Temperature'
+        ))
+        
+        fig_hourly.update_layout(
+            title="Average Temperature by Hour of Day",
+            xaxis_title="Hour of Day",
+            yaxis_title="Temperature (°C)",
+            xaxis=dict(
+                tickmode='array',
+                tickvals=list(range(0, 24, 2)),
+                ticktext=[f"{h}:00" for h in range(0, 24, 2)]
+            ),
+            hovermode="x unified",
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        st.plotly_chart(fig_hourly, use_container_width=True)
+        
+        # Insights
+        st.subheader("Temperature Insights")
+        
+        # Calculate temperature change rate
+        if len(filtered_df) > 1:
+            temp_change = filtered_df[temp_col].diff().mean() * 24  # Average hourly change * 24 for daily rate
+            
+            if abs(temp_change) < 0.1:
+                trend_message = "Temperature has been relatively stable."
+            elif temp_change > 0:
+                trend_message = f"Temperature has been rising at approximately {abs(temp_change):.1f}°C per day."
+            else:
+                trend_message = f"Temperature has been falling at approximately {abs(temp_change):.1f}°C per day."
+            
+            st.info(f"📊 Insight: {trend_message}")
+        
+        # Time of day insight
+        hottest_hour = hourly_temps.loc[hourly_temps['mean'].idxmax(), 'hour']
+        coldest_hour = hourly_temps.loc[hourly_temps['mean'].idxmin(), 'hour']
+        
+        st.info(f"🌡️ The hottest time of day is typically around {hottest_hour}:00, while the coldest is around {coldest_hour}:00.")
+        
+        # Daily pattern insight
+        daily_temp_range = hourly_temps['mean'].max() - hourly_temps['mean'].min()
+        if daily_temp_range > 10:
+            variation_msg = "There is a large temperature variation throughout the day."
+        elif daily_temp_range > 5:
+            variation_msg = "There is a moderate temperature variation throughout the day."
+        else:
+            variation_msg = "Temperature remains relatively consistent throughout the day."
+        
+        st.info(f"🌤️ {variation_msg} The daily temperature range is approximately {daily_temp_range:.1f}°C.")
+    else:
+        st.warning("Temperature or timestamp data not available in the dataset.")
+
+# Main app logic
+if LAKEFS_AVAILABLE:
+    # Load data button
+    if st.sidebar.button("Load Data"):
+        df, success = load_data_from_lakefs()
+        if success:
+            st.session_state['df'] = df
+            st.session_state['data_loaded'] = True
+            st.success("Data loaded successfully!")
+        else:
+            st.session_state['data_loaded'] = False
+    
+    # Check if data is loaded
+    if st.session_state.get('data_loaded', False):
+        df = st.session_state['df']
+        
+        # Sidebar options
         st.sidebar.header("Data Analysis Options")
         analysis_type = st.sidebar.selectbox(
             "Choose Analysis Type",
-            ["Weather Overview", "Temperature Trends", "Weather Distribution"]
+            ["Weather Overview", "Temperature Trends"]
         )
         
-        # Location filter
-        if 'location' in df.columns:
-            locations = ['All'] + sorted(df['location'].unique().tolist())
-            selected_location = st.sidebar.selectbox("Select Location", locations)
-            
-            # Filter data based on location
-            if selected_location != 'All':
-                filtered_df = df[df['location'] == selected_location]
-            else:
-                filtered_df = df.copy()
-        else:
-            filtered_df = df.copy()
-            
-        # Date range filter
-        date_range = st.sidebar.date_input(
-            "Select Date Range",
-            [filtered_df['timestamp'].min().date(), filtered_df['timestamp'].max().date()],
-            min_value=filtered_df['timestamp'].min().date(),
-            max_value=filtered_df['timestamp'].max().date()
-        )
+        # Determine location column
+        location_col = None
+        for col_name in ['location_name', 'location', 'requested_province', 'province', 'city']:
+            if col_name in df.columns:
+                location_col = col_name
+                break
         
-        if len(date_range) == 2:
-            start_date, end_date = date_range
-            mask = (filtered_df['timestamp'].dt.date >= start_date) & (filtered_df['timestamp'].dt.date <= end_date)
-            filtered_df = filtered_df[mask]
-        
-        if analysis_type == "Weather Overview":
-            st.header("Current Weather Metrics")
+        # Location filter using dropdown
+        selected_locations = []
+        if location_col:
+            # แปลงข้อมูลให้เป็น string แล้ว
+            all_locations = df[location_col].astype(str).unique().tolist()
+            all_locations.sort()  # เรียงลำ
             
-            # Get the most recent data point
-            latest_data = filtered_df.sort_values('timestamp').iloc[-1]
+            # Add an "All Locations" option
+            dropdown_options = ["All Locations"] + all_locations
             
-            # Display key metrics in columns
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(
-                    "Temperature", 
-                    f"{latest_data['temperature']:.1f}°C",
-                    delta=f"{latest_data['temperature'] - filtered_df.iloc[-2]['temperature']:.1f}°C" if len(filtered_df) > 1 else None
-                )
-            
-            with col2:
-                if 'humidity' in filtered_df.columns:
-                    st.metric(
-                        "Humidity", 
-                        f"{latest_data['humidity']:.1f}%",
-                        delta=f"{latest_data['humidity'] - filtered_df.iloc[-2]['humidity']:.1f}%" if len(filtered_df) > 1 else None
-                    )
-                else:
-                    st.metric("Humidity", "N/A")
-            
-            with col3:
-                if 'wind_speed' in filtered_df.columns:
-                    st.metric(
-                        "Wind Speed", 
-                        f"{latest_data['wind_speed']:.1f} m/s",
-                        delta=f"{latest_data['wind_speed'] - filtered_df.iloc[-2]['wind_speed']:.1f}" if len(filtered_df) > 1 else None
-                    )
-                else:
-                    st.metric("Wind Speed", "N/A")
-            
-            # Interactive multi-metric chart
-            st.subheader("Weather Metrics Over Time")
-            
-            metrics = ["temperature"]
-            if 'humidity' in filtered_df.columns:
-                metrics.append("humidity")
-            if 'wind_speed' in filtered_df.columns:
-                metrics.append("wind_speed")
-                
-            selected_metrics = st.multiselect(
-                "Select Metrics to Display",
-                options=metrics,
-                default=["temperature"]
+            # Create the dropdown
+            selected_option = st.sidebar.selectbox(
+                "Select Location",
+                options=dropdown_options,
+                index=0  # Default to "All Locations"
             )
             
-            if selected_metrics:
-                fig = go.Figure()
-                
-                for metric in selected_metrics:
-                    fig.add_trace(go.Scatter(
-                        x=filtered_df['timestamp'],
-                        y=filtered_df[metric],
-                        mode='lines',
-                        name=metric.capitalize()
-                    ))
-                
-                fig.update_layout(
-                    title="Weather Metrics Trend",
-                    xaxis_title="Time",
-                    yaxis_title="Value",
-                    legend_title="Metrics",
-                    hovermode="x unified"
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Weather condition
-            if 'weather_main' in filtered_df.columns:
-                st.subheader("Current Weather Condition")
-                st.info(f"🌤️ {latest_data['weather_main']} - {latest_data.get('weather_description', '')}")
-        
-        elif analysis_type == "Temperature Trends":
-            st.header("Temperature Trends Over Time")
-            
-            # Visualization 1: Temperature Line Chart
-            fig1 = px.line(filtered_df, 
-                          x='timestamp', 
-                          y='temperature',
-                          title='Temperature Variation Over Time',
-                          labels={'temperature': 'Temperature (°C)', 
-                                 'timestamp': 'Time'})
-            st.plotly_chart(fig1, use_container_width=True)
-            
-            # Temperature heatmap by hour and day
-            if len(filtered_df) > 24:
-                st.subheader("Temperature Patterns by Hour and Day")
-                
-                filtered_df['day'] = filtered_df['timestamp'].dt.day
-                filtered_df['hour'] = filtered_df['timestamp'].dt.hour
-                
-                # Create pivot table for heatmap
-                temp_pivot = filtered_df.pivot_table(
-                    values='temperature', 
-                    index='day',
-                    columns='hour',
-                    aggfunc='mean'
-                )
-                
-                fig_heatmap = px.imshow(
-                    temp_pivot,
-                    labels=dict(x="Hour of Day", y="Day of Month", color="Temperature (°C)"),
-                    x=temp_pivot.columns,
-                    y=temp_pivot.index,
-                    color_continuous_scale="RdBu_r"
-                )
-                
-                fig_heatmap.update_layout(title="Temperature Heatmap by Hour and Day")
-                st.plotly_chart(fig_heatmap, use_container_width=True)
-            
-            # Insight
-            st.info("📊 Insight: The temperature data shows clear daily patterns with peaks during midday hours and troughs during early morning.")
-            
-        elif analysis_type == "Weather Distribution":
-            st.header("Weather Condition Distribution")
-            
-            # Visualization 2: Weather Distribution
-            if 'weather_main' in filtered_df.columns:
-                weather_counts = filtered_df['weather_main'].value_counts()
-                fig2 = px.bar(weather_counts, 
-                            title='Distribution of Weather Conditions',
-                            labels={'value': 'Count', 
-                                    'index': 'Weather Condition'})
-                st.plotly_chart(fig2, use_container_width=True)
-                
-                # Insight
-                st.info("📊 Insight: The distribution shows the predominant weather patterns in the region.")
-                
-                # Weather conditions by time of day
-                st.subheader("Weather Conditions by Time of Day")
-                filtered_df['hour'] = filtered_df['timestamp'].dt.hour
-                weather_hour = filtered_df.groupby(['weather_main', 'hour']).size().reset_index(name='count')
-                
-                fig_weather_hour = px.bar(
-                    weather_hour,
-                    x='hour',
-                    y='count',
-                    color='weather_main',
-                    title='Weather Conditions by Hour of Day',
-                    labels={'hour': 'Hour of Day', 'count': 'Frequency', 'weather_main': 'Weather Condition'}
-                )
-                st.plotly_chart(fig_weather_hour, use_container_width=True)
+            # Process the selection
+            if selected_option == "All Locations":
+                selected_locations = all_locations
             else:
-                st.warning("Weather condition data not available in the dataset.")
-
-    except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
-        st.error("No data found. Please run the pipeline first.")
+                selected_locations = [selected_option]
+        
+        # Date range filter
+        date_range = None
+        if 'timestamp' in df.columns:
+            date_range = st.sidebar.date_input(
+                "Select Date Range",
+                [df['timestamp'].min().date(), df['timestamp'].max().date()],
+                min_value=df['timestamp'].min().date(),
+                max_value=df['timestamp'].max().date()
+            )
+        
+        # Filter data
+        filtered_df = filter_data(df, location_col, selected_locations, date_range)
+        
+        # Show selected analysis
+        if analysis_type == "Weather Overview":
+            show_weather_overview(filtered_df, location_col, selected_locations)
+        elif analysis_type == "Temperature Trends":
+            show_temperature_trends(filtered_df)
+    else:
+        st.info("👈 Please configure your LakeFS connection settings in the sidebar and click 'Load Data'")
 else:
-    st.error("LakeFS client not available. Please install the lakefs_client package.")
+    st.error("LakeFS client not available. Please install the lakefs_client package with: pip install lakefs-client")
     
     # Display sample data for demonstration
     st.subheader("Sample Data (Demo Mode)")
+    sample_df = generate_sample_data()
+    st.line_chart(sample_df.set_index('timestamp')[['main.temp', 'main.humidity', 'wind.speed', 'precipitation']])
+    st.warning("This is sample data. Install lakefs-client and connect to LakeFS to see real data.")
+
+# Debug section
+if st.checkbox("Show Debug Info", False):
+    st.subheader("Debug Information")
     
-    # Generate sample data
-    dates = pd.date_range(start='2023-01-01', periods=100, freq='H')
-    sample_data = {
-        'timestamp': dates,
-        'temperature': np.sin(np.arange(100)/10) * 5 + 25 + np.random.normal(0, 1, 100),
-        'humidity': np.cos(np.arange(100)/10) * 10 + 60 + np.random.normal(0, 3, 100),
-        'wind_speed': np.abs(np.random.normal(5, 2, 100)),
-        'weather_main': np.random.choice(['Clear', 'Clouds', 'Rain', 'Drizzle'], 100)
-    }
-    
-    sample_df = pd.DataFrame(sample_data)
-    
-    # Display sample visualization
-    st.line_chart(sample_df.set_index('timestamp')[['temperature', 'humidity', 'wind_speed']])
-    st.warning("This is sample data. Connect to LakeFS to see real data.")
+    if 'filtered_df' in locals():
+        # Show dataframe info
+        st.write("DataFrame Info:")
+        buffer = io.StringIO()
+        filtered_df.info(buf=buffer)
+        st.text(buffer.getvalue())
+        
+        # Show column types
+        st.write("Column Types:")
+        st.write(filtered_df.dtypes)
+        
+        # Show sample data
+        st.write("Sample Data:")
+        st.write(filtered_df.head())
+    else:
+        st.warning("No filtered data available yet.")
+        
+        # Show session state for debugging
+        st.write("Session State Keys:")
+        st.write(list(st.session_state.keys()))
+        
+        if 'df' in st.session_state:
+            st.write("Raw dataframe is available in session state")
+            st.write("Sample from raw dataframe:")
+            st.write(st.session_state['df'].head())

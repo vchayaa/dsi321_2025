@@ -2,7 +2,7 @@ from prefect import flow
 from pathlib import Path
 
 source=str(Path.cwd())
-entrypoint = f"flow.py:hello_flow"
+entrypoint = f"flow.py:main_flow" #python file: function
 print(f'entrypoint:{entrypoint}, source:{source}')
 
 if __name__ == "__main__":
@@ -10,10 +10,8 @@ if __name__ == "__main__":
         source=source,
         entrypoint=entrypoint,
     ).deploy(
-        name="local_deployment",
-        parameters={
-            'name': 'DSI: Big Data Infrastructure'
-        },
+        name="weather_deployment",
+        parameters={},
         work_pool_name="default-agent-pool",
-        cron="* * * * *",  # Run every munite
+        cron="*/15 * * * *",  # Run every 5 munites
     )
