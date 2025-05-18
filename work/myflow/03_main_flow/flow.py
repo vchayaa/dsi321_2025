@@ -40,18 +40,16 @@ def get_weather_data(location_context={'location':None, 'province':None, 'lat':N
             'hour': timestamp.hour,
             'minute': timestamp.minute,
             'created_at': created_at,
-            'province': province,  # เลือก
-            'location_name': location,  # ชื่อสถาน
-            'api_location': data['name'],  # ชื่อสถานจาก API
+            'province': province,
+            'location_name': location,
+            'api_location': data['name'],
             'weather_main': data['weather'][0]['main'],
             'weather_description': data['weather'][0]['description'],
             'main.temp': data['main']['temp'],
-            # Adding humidity
             'main.humidity': data['main']['humidity'],
-            # Adding wind speed
             'wind.speed': data['wind']['speed'],
-            # Adding precipitation (rain or snow)
-            'precipitation': get_precipitation(data)
+            'rain.1h': get_rain_1h(data),  # Rain volume for last hour in mm
+            'rain.3h': get_rain_3h(data)   # Rain volume for last 3 hours in mm
         }
         
         return weather_dict
@@ -63,15 +61,19 @@ def get_weather_data(location_context={'location':None, 'province':None, 'lat':N
         print(f"Error processing data: Missing key {e}")
         return None
 
-# Helper function to extract precipitation data
-def get_precipitation(data):
+# Helper function to extract rain volume for last hour
+def get_rain_1h(data):
     # Check for rain data (last 1 hour)
     if 'rain' in data and '1h' in data['rain']:
         return data['rain']['1h']
-    # Check for snow data (last 1 hour)
-    elif 'snow' in data and '1h' in data['snow']:
-        return data['snow']['1h']
-    # No precipitation
+    else:
+        return 0.0
+
+# Helper function to extract rain volume for last 3 hours
+def get_rain_3h(data):
+    # Check for rain data (last 3 hours)
+    if 'rain' in data and '3h' in data['rain']:
+        return data['rain']['3h']
     else:
         return 0.0
 @flow(name="main-flow", log_prints=True)
