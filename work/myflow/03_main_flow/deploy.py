@@ -13,5 +13,5 @@ if __name__ == "__main__":
         name="weather_deployment",
         parameters={},
         work_pool_name="default-agent-pool",
-        cron="*/15 * * * *",  # Run every 5 munites
+        cron="*/15 * * * *",  # Run every 15 munites
     )

@@ -49,7 +49,8 @@ def get_weather_data(location_context={'location':None, 'province':None, 'lat':N
             'main.humidity': data['main']['humidity'],
             'wind.speed': data['wind']['speed'],
             'rain.1h': get_rain_1h(data),  # Rain volume for last hour in mm
-            'rain.3h': get_rain_3h(data)   # Rain volume for last 3 hours in mm
+            'rain.3h': get_rain_3h(data),  # Rain volume for last 3 hours in mm
+            'precipitation': get_precipitation(data)  # Total precipitation
         }
         
         return weather_dict
@@ -76,6 +77,15 @@ def get_rain_3h(data):
         return data['rain']['3h']
     else:
         return 0.0
+
+# Helper function to calculate total precipitation
+def get_precipitation(data):
+    # Sum of rain.1h and any snow if available
+    precipitation = get_rain_1h(data)
+    if 'snow' in data and '1h' in data['snow']:
+        precipitation += data['snow']['1h']
+    return precipitation
+
 @flow(name="main-flow", log_prints=True)
 def main_flow(parameters={}):
     locations = {

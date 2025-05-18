@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
 # Install Python packages including a specific version of lakefs-client
 # Using version 0.91.0 which should be compatible with lakeFS 1.7.0
 # Adding fsspec and s3fs for remote storage access
-RUN pip install --no-cache-dir streamlit pandas numpy plotly lakefs-client==0.91.0 fsspec s3fs pyarrow
+RUN pip install --no-cache-dir streamlit pandas numpy plotly lakefs-client==0.91.0 fsspec s3fs pyarrow scikit-learn
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -23,6 +23,7 @@ EXPOSE 8503
 
 # Command to run when the container starts
 CMD ["streamlit", "run", "app.py", "--server.port=8503", "--server.enableCORS=false"]
+
 
 
 
