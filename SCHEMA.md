@@ -33,6 +33,7 @@ The following columns are used as key metrics for analysis:
 - wind.speed
 - rain.1h
 - rain.3h
+- precipitation
 
 ## Data Format
 
