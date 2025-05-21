@@ -4,10 +4,10 @@ A comprehensive data engineering solution that collects, processes, and visualiz
 
 ## Key Features
 
-- **Automated Data Collection**: Fetches weather data for Bangkok, Chiang Mai, Phuket, Pathum Thani and other locations every 15 minutes
+- **Automated Data Collection**: Fetches weather data for Satitram and other 14 locations nearby every 15 minutes
 - **Workflow Orchestration**: Leverages Prefect 3 for reliable, scheduled pipeline execution
 - **Data Versioning**: Implements LakeFS for data versioning and lineage tracking
-- **Bilingual Insights**: Interactive Streamlit dashboard with weather analytics in both English and Thai
+- **Bilingual Insights**: Interactive Streamlit dashboard with weather analytics 
 - **Containerized Architecture**: Docker-based deployment for consistent environments
 - **Optimized Storage**: Partitioned Parquet files with appropriate data types for efficient querying
 
@@ -17,39 +17,42 @@ A comprehensive data engineering solution that collects, processes, and visualiz
 - **Docker & Docker Compose**: Service containerization and orchestration
 - **LakeFS**: Data lake management with Git-like versioning
 - **Streamlit**: Interactive data visualization dashboard
-- **Jupyter**: Data exploration and analysis notebooks
 - **Pandas/PyArrow**: Efficient data processing and storage
 
 ## Quick Start
 
 1. Clone the repository
-2. Set your OpenWeatherMap API key in `.env`
+2. install requirement.txt by `pip install -r requirements.txt`
 3. Run `docker-compose up -d` in the docker directory
 4. Access the dashboard at http://localhost:8503
 5. Explore data versions in LakeFS at http://localhost:8001
 
-The system collects temperature, humidity, wind speed, and rainfall data (1h/3h measurements), providing valuable insights through time-series analysis and daily patterns with Thai language support.
+The system collects temperature, humidity, wind speed, rainfall data (1h/3h measurements) and precipitation , providing valuable insights through time-series analysis and daily patterns with Thai language support.
 
 ## Project Structure
 
 ```
-project_repo/
-├── docker/
-│   ├── Dockerfile                # Docker image configuration
-│   └── docker-compose.yml        # Docker services configuration
-├── notebooks/
-│   └── weather_analysis.ipynb    # Jupyter notebook for data analysis
-├── src/
-│   ├── __init__.py               # Package initialization
-│   ├── config.py                 # Configuration settings (single source of truth)
-│   ├── deploy.py                 # Deployment script for Prefect
-│   ├── main.py                   # Main pipeline implementation
-│   └── utils.py                  # Utility functions
-├── visualization/
+projectfolder/
+├── docker/                       # Docker configuration
+│   ├── Dockerfile                # Streamlit app container
+│   
+├── make/                         # Build configurations
+│   ├── Dockerfile.jupyter        # Jupyter notebook container
+│   ├── Dockerfile.prefect-worker # Prefect worker container
+│   ├── requirements.txt          # Python dependencies
+│   └── wait-for-server.sh        # Service startup script
+├── visualization/                # Dashboard components
 │   └── app.py                    # Streamlit visualization app
-├── .env                          # Environment variables
+├── work/                         # Workflow definitions
+│   ├── myflow/                   # Prefect flow modules
+│   │   └── 03_main_flow/         # Main data pipeline
+│   │       ├── deploy.py         # Deployment configuration
+│   │       ├── deploy-local.py   # Local deployment script
+│   │       └── flow.py           # Main pipeline implementation
+│  
+├── docker-compose.yml        # Multi-container orchestration
 ├── README.md                     # Project documentation
-├── STRUCTURE.md                  # Project structure documentation
+├── SCHEMA.md                     # Data schema documentation
 └── requirements.txt              # Python dependencies
 ```
 
@@ -60,17 +63,17 @@ project_repo/
 - Docker and Docker Compose
 - Python 3.8+
 - OpenWeatherMap API key
-- LakeFS repository (already created: "project324")
+- LakeFS repository (already created: "weather")
 
 ### Installation Steps
 
 1. Clone the repository:
    ```
    git clone <repository-url>
-   cd project_repo
+   cd projectfolder
    ```
 
-2. Ensure your LakeFS repository "project324" is set up and accessible
+2. Ensure your LakeFS repository "weather" is set up and accessible
 
 3. Install the required Python packages:
    ```
@@ -85,40 +88,21 @@ project_repo/
 
 ## Running the Pipeline
 
-### Manual Execution
-
-To run the pipeline manually:
-
-```
-python -m src.pipeline
-```
-
-This will:
-- Collect weather data for Thai provinces (Pathum Thani, Bangkok, Chiang Mai, Phuket)
-- Collect weather data for international cities
-- Process and save the data
-- Upload the data to your LakeFS repository "project324"
-
 ### Scheduled Execution
 
-To create a scheduled deployment:
+To create a scheduled deployment: open jupyter and open terminal then run
 
 ```
-python -m src.deploy
+python deploy-local.py
 ```
 
 This will deploy the pipeline to run at the interval specified in your configuration.
 
-## Data Analysis
+if it's not working may be your workpool don't run properly 
 
-1. Start Jupyter Notebook:
-   ```
-   jupyter notebook
-   ```
-
-2. Open the `notebooks/weather_analysis.ipynb` notebook
-
-3. Follow the instructions in the notebook to analyze the collected weather data
+```
+prefect worker start --pool 'default-agent-pool'
+```
 
 ## Data Visualization
 
@@ -144,7 +128,7 @@ You can access the LakeFS UI at http://localhost:8001 (or your configured port) 
 
 ## Configuration
 
-All configuration is centralized in `src/config.py`:
+All configuration is centralized in `myflow/03_main_flow/flow.py`:
 
 - Weather API settings
 - Province and city definitions
@@ -152,16 +136,14 @@ All configuration is centralized in `src/config.py`:
 - LakeFS connection details
 - Prefect settings
 
-You can override these settings by updating the `.env` file.
 
 ## Customization
 
 You can customize the pipeline by:
 
-1. Adding more provinces or cities in the `PROVINCES` and `CITIES` variables in `src/config.py`
-2. Modifying the data collection interval in `.env`
-3. Adding more data processing steps in `src/main.py`
-4. Extending the visualization in `visualization/app.py`
+1. Adding more provinces and locations in the `PROVINCES` and `location` variables in `myflow/03_main_flow/flow.py`
+2. Adding more data processing steps in `myflow/03_main_flow/flow.py`
+3. Extending the visualization in `visualization/app.py`
 
 ## Troubleshooting
 
