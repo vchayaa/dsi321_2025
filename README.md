@@ -120,8 +120,6 @@ This will start a Streamlit server and open a web browser with the visualization
 The pipeline is configured to work with your existing LakeFS repository "project324":
 
 - Data is stored in the "main" branch by default
-- Province data is stored in the "province" directory
-- City data is stored in the "city" directory
 - Both raw and processed data are versioned
 
 You can access the LakeFS UI at http://localhost:8001 (or your configured port) to browse, compare, and manage your data versions.
@@ -162,3 +160,30 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - OpenWeatherMap for providing the weather data API
 - The Prefect, Docker, and LakeFS communities for their excellent documentation
+
+## Visualization
+
+![image alt](https://github.com/vchayaa/dsi321_2025/blob/ea33bc92f721253a041f9420398332064568929c/satit1.png)
+
+- in "Current Weahter Metrics" will appear 5 Metrics as Temperature, Humidity, Wind speed, Rainfall(1h), Rainfall(3h)
+- in "Current Weather Condition" will display how weather condition is from the last record and a description of main weather condition
+- in "Weather Metrics Over Time" will show a graph that can be select which metric, location and Time range to display
+
+
+![image alt](https://github.com/vchayaa/dsi321_2025/blob/ea33bc92f721253a041f9420398332064568929c/satit2.png) 
+
+- in "Temperature Insights" will show summarize insights or data of the location, Time range that user selected in Thai
+- in "Temperature Statsitics" will show Average Temp, Max temp and Min temp
+- in "Temperature Variation by time by day" will show the temperature variation at different times of the day.
+
+
+
+![image alt](https://github.com/vchayaa/dsi321_2025/blob/ea33bc92f721253a041f9420398332064568929c/satit3.png)
+
+- in "Temperature Patterns by hour by day" shows a heatmap of temperature pattern of the day
+
+
+
+![image alt](https://github.com/vchayaa/dsi321_2025/blob/ea33bc92f721253a041f9420398332064568929c/satit4.png)
+
+- This page shows a K-means clustering machine learning that classifies weather conditions into 3 groups using temperature, humidity, wind speed and precipitaion, and provides recommendations for action in different weather conditions.
